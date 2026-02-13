@@ -124,6 +124,20 @@ public actor SandboxService {
             var kernel = try bundle.kernel
             kernel.commandLine.kernelArgs.append("oops=panic")
             kernel.commandLine.kernelArgs.append("lsm=lockdown,capability,landlock,yama,apparmor")
+
+            // When running x86_64 containers via Rosetta 2, the emulated CPUID
+            // advertises AVX/AVX2 support that Rosetta cannot fully execute.
+            // This causes OpenSSL 3.x TLS failures:
+            //   "error:030000EA:digital envelope routines::provider signature failure"
+            // Mask these CPU features at the kernel level so all userspace software
+            // (not just OpenSSL) sees the correct capabilities.
+            #if arch(arm64)
+            if config.rosetta {
+                kernel.commandLine.kernelArgs.append("clearcpuid=156")  // AVX
+                kernel.commandLine.kernelArgs.append("clearcpuid=avx")
+                kernel.commandLine.kernelArgs.append("clearcpuid=avx2")
+            }
+            #endif
             let vmm = VZVirtualMachineManager(
                 kernel: kernel,
                 initialFilesystem: bundle.initialFilesystem.asMount,
@@ -890,6 +904,7 @@ public actor SandboxService {
         czConfig.process.arguments = [process.executable] + process.arguments
         czConfig.process.environmentVariables = process.environment
 
+
         if Self.sshAuthSocketHostUrl(config: config) != nil {
             if !czConfig.process.environmentVariables.contains(where: { $0.starts(with: "\(Self.sshAuthSocketEnvVar)=") }) {
                 czConfig.process.environmentVariables.append("\(Self.sshAuthSocketEnvVar)=\(Self.sshAuthSocketGuestPath)")
@@ -935,6 +950,7 @@ public actor SandboxService {
 
         proc.arguments = [config.executable] + config.arguments
         proc.environmentVariables = config.environment
+
 
         if Self.sshAuthSocketHostUrl(config: containerConfig) != nil {
             if !proc.environmentVariables.contains(where: { $0.starts(with: "\(Self.sshAuthSocketEnvVar)=") }) {
